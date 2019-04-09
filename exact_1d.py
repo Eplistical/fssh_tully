@@ -46,7 +46,7 @@ def exact_1d(xI, kxI, init_s):
     sigmax = 1.0
 
     dt = 0.1
-    Nstep = 15000
+    Nstep = 13500
     tgraph = 100
 
     # grids
@@ -63,6 +63,7 @@ def exact_1d(xI, kxI, init_s):
     VU = np.zeros([M,N,N], dtype=np.complex)
     Hs = np.zeros([M,N,N], dtype=np.float)
     evas = np.zeros([M,N,N], dtype=np.float)
+    evts = np.zeros([M,N,N], dtype=np.float)
     for i, x in enumerate(x0):
         H = cal_H(x)
         VU[i,:,:] = la.expm(-1j * dt / 2 * H)
@@ -71,11 +72,26 @@ def exact_1d(xI, kxI, init_s):
         eva, evt = la.eigh(H)
         evas[i,:,:] = np.diag(eva)
 
-    # Initial Wavefunction -- Gaussian wavepacket
+        if i > 0:
+            phase0 = evts[i-1,0,0] * evt[0,0] + evts[i-1,1,0] * evt[1,0]
+            phase1 = evts[i-1,0,1] * evt[0,1] + evts[i-1,1,1] * evt[1,1]
+            if phase0 < 0.0:
+                evt[:,0] *= -1
+            if phase1 < 0.0:
+                evt[:,1] *= -1
+
+        evts[i,:,:] = evt
+
+    # Initial Wavefunction -- Gaussian wavepacket on adiabats
+    psiad0 = np.zeros([M,N], dtype=np.complex)
+    psiad0[:,0] = c0 * np.exp(1j*(kxI*x0)) * np.exp(-(x0-xI)**2/sigmax**2);
+    psiad0[:,1] = c1 * np.exp(1j*(kxI*x0)) * np.exp(-(x0-xI)**2/sigmax**2);
+    psiad0 /= np.sqrt(np.sum(np.abs(psiad0)**2))
+
+    # convert to diabats
     psi0 = np.zeros([M,N], dtype=np.complex)
-    psi0[:,0] = c0 * np.exp(1j*(kxI*x0)) * np.exp(-(x0-xI)**2/sigmax**2);
-    psi0[:,1] = c1 * np.exp(1j*(kxI*x0)) * np.exp(-(x0-xI)**2/sigmax**2);
-    psi0 /= np.sqrt(np.sum(np.abs(psi0)**2))
+    psi0[:,0] = evts[:,0,0] * psiad0[:,0] + evts[:,0,1] * psiad0[:,1]
+    psi0[:,1] = evts[:,1,0] * psiad0[:,0] + evts[:,1,1] * psiad0[:,1]
 
     # Propagate WF
     psi_k = np.zeros([M,N], dtype=np.complex)
@@ -96,6 +112,9 @@ def exact_1d(xI, kxI, init_s):
 
         # analysis & report
         if t % tgraph == 0:
+            psiad = np.zeros([M,N], dtype=np.complex)
+            psiad[:,0] = np.conj(evts[:,0,0]) * psi[:,0] + np.conj(evts[:,1,0]) * psi[:,1];
+            psiad[:,1] = np.conj(evts[:,0,1]) * psi[:,0] + np.conj(evts[:,1,1]) * psi[:,1];
 
             # plot
             if enable_plot:
@@ -104,8 +123,8 @@ def exact_1d(xI, kxI, init_s):
                 ax = fig.gca()
                 ax.plot(x0, evas[:,0,0], '-r')
                 ax.plot(x0, evas[:,1,1], '-g')
-                ax.fill_between(x0, evas[:,0,0],  evas[:,0,0] + 0.2*np.abs(psi[:,0])**2, color='#eec881')
-                ax.fill_between(x0, evas[:,1,1],  evas[:,1,1] + 0.2*np.abs(psi[:,1])**2, color='#81d0ee')
+                ax.fill_between(x0, evas[:,0,0],  evas[:,0,0] + 0.15*np.abs(psiad[:,0])**2, color='#eec881')
+                ax.fill_between(x0, evas[:,1,1],  evas[:,1,1] + 0.15*np.abs(psiad[:,1])**2, color='#81d0ee')
 
                 ax.set_xlim([-L/2, L/2])
                 ax.set_ylim([-0.015,0.025])
