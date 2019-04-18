@@ -17,6 +17,8 @@
 #include "tully3_potential.hpp"
 //#include "tully1_potential.hpp"
 
+// A-FSSH WITH LANDRY'S ALGORITHM
+//  LANDRY, SUBOTNIK, J. Chem. Phys. 137, 22A513 (2012)
 
 // -- GLOBAL -- //
 
@@ -105,7 +107,6 @@ void init_state(state_t& state) {
 }
 
 bool check_end(const state_t& state) {
-    /*
     double x = state[0].real();
     double p = state[1].real();
     if (x < -15.0 and p < 0.0) {
@@ -114,7 +115,6 @@ bool check_end(const state_t& state) {
     if (x > 15.0 and p > 0.0) {
         return true;
     }
-    */
     return false;
 }
 
@@ -162,15 +162,26 @@ void integrator(state_t& state, const double dt) {
         }
         dFsigma = matrixop::anticommutator(dF, sigma);
 
-        l1 = dt * (-zI * matrixop::commutator(Emat, rmom) + pmom / mass -  v * matrixop::commutator(dc, rmom));
-        m1 = dt * (-zI * matrixop::commutator(Emat, pmom) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom));
-        l2 = dt * (-zI * matrixop::commutator(Emat, rmom + 0.5 * l1) + (pmom + 0.5 * m1) / mass -  v * matrixop::commutator(dc, rmom + 0.5 * l1));
-        m2 = dt * (-zI * matrixop::commutator(Emat, pmom + 0.5 * m1) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom + 0.5 * m1));
-        l3 = dt * (-zI * matrixop::commutator(Emat, rmom + 0.5 * l2) + (pmom + 0.5 * m2) / mass -  v * matrixop::commutator(dc, rmom + 0.5 * l2));
-        m3 = dt * (-zI * matrixop::commutator(Emat, pmom + 0.5 * m2) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom + 0.5 * m2));
-        l4 = dt * (-zI * matrixop::commutator(Emat, rmom + l3) + (pmom + m3) / mass -  v * matrixop::commutator(dc, rmom + l3));
-        m4 = dt * (-zI * matrixop::commutator(Emat, pmom + m3) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom + m3));
-        
+        TR = -zI * matrixop::commutator(Emat, rmom) + pmom / mass -  v * matrixop::commutator(dc, rmom);
+        TP = -zI * matrixop::commutator(Emat, pmom) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom);
+        l1 = dt * (TR - TR[s+s*edim] * matrixop::eye(edim));
+        m1 = dt * (TP - TP[s+s*edim] * matrixop::eye(edim));
+
+        TR = -zI * matrixop::commutator(Emat, rmom + 0.5 * l1) + (pmom + 0.5 * m1) / mass -  v * matrixop::commutator(dc, rmom + 0.5 * l1);
+        TP = -zI * matrixop::commutator(Emat, pmom + 0.5 * m1) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom + 0.5 * m1);
+        l2 = dt * (TR - TR[s+s*edim] * matrixop::eye(edim));
+        m2 = dt * (TP - TP[s+s*edim] * matrixop::eye(edim));
+
+        TR = -zI * matrixop::commutator(Emat, rmom + 0.5 * l2) + (pmom + 0.5 * m2) / mass -  v * matrixop::commutator(dc, rmom + 0.5 * l2);
+        TP = -zI * matrixop::commutator(Emat, pmom + 0.5 * m2) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom + 0.5 * m2);
+        l3 = dt * (TR - TR[s+s*edim] * matrixop::eye(edim));
+        m3 = dt * (TP - TP[s+s*edim] * matrixop::eye(edim));
+
+        TR = -zI * matrixop::commutator(Emat, rmom + l3) + (pmom + m3) / mass -  v * matrixop::commutator(dc, rmom + l3);
+        TP = -zI * matrixop::commutator(Emat, pmom + m3) + 0.5 * dFsigma - v * matrixop::commutator(dc, pmom + m3);
+        l4 = dt * (TR - TR[s+s*edim] * matrixop::eye(edim));
+        m4 = dt * (TP - TP[s+s*edim] * matrixop::eye(edim));
+
         rmom += l1 / 6.0 + l2 / 3.0 + l3 / 3.0 + l4 / 6.0;
         pmom += m1 / 6.0 + m2 / 3.0 + m3 / 3.0 + m4 / 6.0;
 
@@ -213,11 +224,22 @@ int hopper(state_t& state) {
 
             // moments
             if (enable_deco) {
-                complex<double> ptmp = pmom[1-s+(1-s)*edim];
-                complex<double> rtmp = rmom[1-s+(1-s)*edim];
-                for (int i(0); i < edim; ++i) {
-                    rmom[i+i*edim] -= rtmp;
-                    pmom[i+i*edim] -= ptmp;
+                rmom.assign(edim * edim, 0.0);
+
+                for (int k(0); k < edim; ++k) {
+                    if (k == s or abs(c[k]) < 1e-8) {
+                        pmom[k+k*edim] = 0.0;
+                    }
+                    else {
+                        double ptmp = pnew * pnew + 2 * mass * (eva[s] - eva[k]);
+                        if (ptmp < 0.0) {
+                            pmom[k+k*edim] = 0.0;
+                        }
+                        else {
+                            pmom[k+k*edim] = pow(abs(c[k]), 2) * (sqrt(ptmp) - pnew) * 
+                                (p > 0.0 ? 1.0 : -1.0);
+                        }
+                    }
                 }
 
                 copy(rmom.begin(), rmom.end(), state.begin() + 5);
@@ -255,19 +277,38 @@ void decoherencer(state_t& state, const double xi = 1.0) {
     vector< complex<double> > rmom(state.begin() + 5, state.begin() + 9);
     vector< complex<double> > pmom(state.begin() + 9, state.begin() + 13);
 
-    // collapse
-    const double Pcollapse = 0.5 * dt * (F[0+0*edim] - F[1+1*edim]).real() * (rmom[0+0*edim] - rmom[1+1*edim]).real() * 
-                ( (rmom[0+0*edim] - rmom[1+1*edim]).real() * (pmom[0+0*edim] - pmom[1+1*edim]).real() > 0.0 ? 1.0 : -1.0);
+    // collapse & reset
+    for (int n(0); n < edim; ++n) {
+        if (n != s) {
+            const double Pcollapse = dt * (0.5 * ((F[n+n*edim] - F[s+s*edim]).real() * rmom[n+n*edim].real()) - 2 * xi * abs(F[s+n*edim] * rmom[n+n*edim]));
+            const double Preset = dt * (-0.5 * ((F[n+n*edim] - F[s+s*edim]).real() * rmom[n+n*edim].real()));
 
-    if (randomer::rand() < Pcollapse) {
-        c[s] = 1.0;
-        c[1-s] = 0.0;
-        rmom.assign(edim * edim, matrixop::ZEROZ);
-        pmom.assign(edim * edim, matrixop::ZEROZ);
+            if (randomer::rand() < Pcollapse) {
+                // Landry 2012 Eqn (45) -- TYPO --
+                c[n] = 0.0;
+                c[s] = c[s] / abs(c[s]) * sqrt(pow(abs(c[s]), 2) + pow(abs(c[n]), 2));
+                copy(c.begin(), c.end(), state.begin() + 2);
 
-        copy(c.begin(), c.end(), state.begin() + 2);
-        copy(rmom.begin(), rmom.end(), state.begin() + 5);
-        copy(rmom.begin(), rmom.end(), state.begin() + 9);
+                for (int j(0); j < edim; ++j) {
+                    rmom[j+n*edim] = 0.0;
+                    pmom[j+n*edim] = 0.0;
+                    rmom[n+j*edim] = 0.0;
+                    pmom[n+j*edim] = 0.0;
+                } 
+                copy(rmom.begin(), rmom.end(), state.begin() + 5);
+                copy(rmom.begin(), rmom.end(), state.begin() + 9);
+            }
+            if (randomer::rand() < Preset) {
+                for (int j(0); j < edim; ++j) {
+                    rmom[j+n*edim] = 0.0;
+                    pmom[j+n*edim] = 0.0;
+                    rmom[n+j*edim] = 0.0;
+                    pmom[n+j*edim] = 0.0;
+                } 
+                copy(rmom.begin(), rmom.end(), state.begin() + 5);
+                copy(rmom.begin(), rmom.end(), state.begin() + 9);
+            }
+        }
     }
 }
 
